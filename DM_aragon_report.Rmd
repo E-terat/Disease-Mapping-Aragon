@@ -1,0 +1,615 @@
+---
+title: "Disease Mapping: Cartografía de enfermedad isquémica en Aragón"
+author: "Paula Sinisterra & Esther Tercero"
+date: '2022-11-02'
+output: rmdformats::downcute
+csl: apa.csl
+bibliography: references.bib
+header-includes:
+  - \renewcommand{\refname}{}
+---
+
+<div style="text-align: justify">
+
+```{r setup, include=FALSE, message=F, warning=F}
+knitr::opts_chunk$set(echo = F, message=F, warning=F, eval = T)
+options(scipen = 999) 
+```
+
+# Líbrerías y datos de Aragón
+
+```{r librerías, echo=TRUE}
+# librerías utilizadas
+packages <- c("rmdformats","rgdal","spdep","R2WinBUGS","RColorBrewer",
+              "colorspace","gridExtra","tidyverse","ggplot2",
+              "sf", "leaflet")
+# comprobación de librerías e instalación del CRAN (si procede)
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages],
+                   repos = "http://cran.us.r-project.org")
+}
+# comprobación de librerías e instalación de INLA (si procede)
+installed_INLA <- "INLA" %in% rownames(installed.packages())
+if (any(installed_INLA == FALSE)) {
+  install.packages("INLA",repos=c(getOption("repos"),
+                                INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+}
+# carga de librerías necesarias
+invisible(lapply(packages, library, character.only = TRUE))
+invisible(lapply("INLA", library, character.only = TRUE))
+```
+
+```{r carga de datos, include=TRUE, echo = TRUE}
+# Carga de la base de datos
+load(file.path("datos", "Aragon.Rdata"))
+aragon_data <- Aragon.df
+
+# Carga de la cartografía
+carto_aragon <- readOGR(file.path("datos", "aragon.shp"), verbose = FALSE)
+carto_aragon <- carto_aragon[order(carto_aragon@data$CODMUNI),]
+carto_aragon@data <- carto_aragon@data %>% left_join(aragon_data)
+
+# Estructura de vecindad
+carto_aragon_nb <- poly2nb(carto_aragon)
+vecinos <- nb2WB(carto_aragon_nb)
+```
+
+# Cartografía de enfermedades
+
+En cartografía de enfermedades (*Disease mapping*), el número de casos asociados a una región, está directamente relacionado con la población de dicho lugar. Medidas como la **Razón de Mortalidad Estandarizada** (SMR por sus siglas en inglés), evitan caer en este sesgo teniendo en cuenta la razón entre eventos observados y eventos esperados. Así, filtra el efecto del tamaño poblacional y permite evaluar si existe un **exceso de riesgo** en cada región estudiada.
+
+Aún así, las zonas menos pobladas, donde los casos son eventos raros, tienden a reflejar riesgos extremos. El no tener casos observados supone un SMR igual a cero, mientras que un único caso dispararía este exceso de riesgo a valores excesivamente altos. Por tanto, existe un **problema en las áreas pequeñas**.
+
+La modelización jerárquica del SMR puede solucionar los inconvenientes asociados a las áreas pequeñas. El **modelo poisson-gamma** puede ser una primera aproximación, para estimar un SMR suavizado (o riesgo) donde las zonas pequeñas, que realmente carecen de exceso de riesgo, pierdan parte de su peso, pero sin quitar protagonismo a las zonas que realmente tengan exceso.
+
+Un modelo más sofisticado permitiría introducir información de vecindad, ya que las zonas cercanas deberían ser parecidas entre sí. Este tipo de datos se pueden incluir como efecto aleatorio con dependencia espacial asumiendo una **distribución Condicional Auto-Regresiva - Normal** (CAR-normal), permitiendo relacionar la observación de una zona con las observaciones de sus localizaciones colindantes. El modelo propuesto por Besaj, York & Mollié [-@besag1991] (modelo BYM) permite aproximar este análisis espacial de riesgos en áreas pequeñas, siendo lo suficientemente flexible como para, aún suavizando el SMR, dejar sobresalir las regiones que tengan un exceso o defecto de riesgo real. Por tanto, la suavización dependerá de los propios datos.
+
+En el presente trabajo se pretende evaluar el comportamiento del modelo BYM en datos de mortalidad por enfermedad
+isquémica masculina en Aragón durante el periodo 1991-2000. Para ello se hará uso de la inferencia bayesiana, empleando diferentes sofwares de implementación. Por un lado, se utilizará el programa WinBUGS, programa estadístico para análisis bayesiano mediante MCMC (Markov Chain Monte-Carlo). Por otro, se implementará el modelo mediante Integrated Nested Lapace Aproximation (INLA), una aproximación a la Inferencia Bayesiana para modelos Latentes Gaussianos.
+
+# Reproducibilidad
+
+## Software
+
+El análisis de los datos se ha realizado en lenguaje de programación R (versión 4.2.2), desde RStudio. Se han empleado, principalmente, los paquetes `R2WinBUGS` e `INLA` para la modelización, y la función `spplot` del paquete `sp` para la generación de los mapas.
+
+## Disponibilidad de recursos
+
+Toda la documentación utilizada para generar este trabajo está a disposición del usuario en el siguiente repositorio de GitHub (https://github.com/E-terat/Disease-Mapping-Aragon). Se recogen tanto datos de cartografía y casos de enfermedad isquémica en Aragón, como los archivos `.rmd` y referencias empleadas.\
+Algunos trozos del código disponibles en el `.rmd` no aparecen en el `html` final dada su irrelevancia a la hora de analizar los resultados obtenidos. En caso de querer evaluarlos todos conviene modificar la primera inserción de código (`{r setup}`) y utilizar `echo = T`. En otros trozos de código, en los modelos probados con WinBUGS, se ha establecido `eval = F` para el documento final se genere más rápido. En caso de que sea de interés evaluar tales modelos, se recomienda hacerlo directamente desde `Rstudio` por este mismo motivo o cambiar `eval = T` de las opciones de ese trozo de código.
+
+Por otro lado, se hace notar que se ha empleado la nomenclatura de tipo snake_case.
+
+Para cualquier duda, el equípo queda totalmente a su disposición. Puede contactar mediante email ([estera\@alumni.uv.es](mailto:estera@alumni.uv.es){.email},[pausise\@alumni.uv.es](mailto:pausise@alumni.uv.es){.email}) o a través de GitHub (<https://github.com/E-terat>).
+
+# Modelización de la enfermedad isquémica en Aragón 
+\label{sec:modelizacion}
+
+Tal y como se adelantaba, el interés está en obtener la distribución a posteriori del SMR (estimador de riesgo) de la Enfermedad Isquémica en Aragón, incorporando la propuesta de BYM. Para ello, se consideran los casos observados (O) en cada municipio como distribuidos según una Poisson de parámetro $\mu$, tal que
+
+$$
+O_i \sim Pois(\mu_i), \,i = 1,...,l,
+$$ 
+$$
+log(\mu_i) = log(E_i) + log(R_i) = log(E_i) +  \mathbf{\boldsymbol\beta\cdot X} + het_i + sp_i, 
+$$
+
+donde: $i$ hace referencia a cada uno de los municipios estudiados; E es el número de casos esperados para cada municipio (offset de la distribución de poisson);  R es el riesgo o razón de mortalidad estandarizada suavizada (sSMR); $\mathbf{\boldsymbol\beta}$ es el vector de coeficientes asociados a la matriz de variables $\mathbf{X}$; $het$ es el efecto heterogéneo, y $sp_i$ es el efecto espacial estructurado. También se considera que
+
+$$
+het_i \sim N(0, \tau_{het}^{-1}) \\
+$$ y
+
+$$
+sp_i|sp_{-i} \sim N(\frac{1}{n_i}\sum_{i\sim j}sp_j,\frac{1}{n_i\cdot \tau_{sp}}), 
+$$
+
+de forma que el efecto aleatorio heterogéneo se distribuye como una Normal centrada en cero y precisión $\tau$ y el efecto espacial estructurado siguiendo una distribución CAR-normal centrada en $\frac{1}{n_i}\sum_{i\sim j}sp_j$ y con precisión $\frac{1}{n_i\cdot \tau_{sp}}$.
+
+# Resultados
+
+## Datos crudos
+
+Como se ha explicado previamente, el SMR ($SMR= O_i/E_i$) se utiliza como estimador del riesgo para evitar un sesgo causado por el tamaño de población. Sin embargo, este estimador presenta algunos problemas cuando se utiliza con áreas pequeñas.
+
+Al comparar el mapa del SMR por municipios y el de la población de Aragón en el año 1995 (Figura 1), se puede observar que la zona central de Aragón es la que más población presenta y también es esta zona la que presenta SMR más intermedias, mientras que en los extremos de la comunidad, donde las poblaciones son más pequeñas, los valores de SMR se vuelven extremos. Esto evidencia el problema de estimación en áreas pequeñas.
+
+```{r calculo de SMR raw}
+# Cálculo de la SMR raw (Standarized Mortality Rate) 
+SMR_raw <- aragon_data$O/aragon_data$E
+carto_aragon$SMR_raw <- SMR_raw
+```
+
+```{r poblacion y SMR raw,fig.align='center'}
+# Categorizar las variables. 
+## Valores de corte
+SMR_raw_cutoff <- c(0,0.70,0.80,0.9,1.1,1.2,1.3,9)         
+pobl_cutoff <- c(0,10^2,10^3,10^4,10^5,10^6)               
+
+## Aplicar cortes con la funcion cut
+SMR_raw_disc = cut(carto_aragon$SMR_raw,
+               breaks = SMR_raw_cutoff,
+               include.lowest = TRUE)
+pob_disc = cut(carto_aragon$POB95,
+               breaks = pobl_cutoff ,
+               include.lowest = TRUE)
+
+# Guardar las nuevas variables
+carto_aragon$SMR_raw_disc <- SMR_raw_disc
+carto_aragon$pob_disc <- pob_disc
+
+# Generar los gráficos de SMR_raw y Población
+levels(carto_aragon$pob_disc) <- c("<10^2", "10^2-10^3", "10^3-10^4",
+                                   "10^4-10^5","10^5-10^6")
+grid.arrange(
+  spplot(carto_aragon,
+         c("SMR_raw_disc"),
+         col.regions = brewer.pal(8,'Oranges'),
+         main = "SMR raw",
+         par.settings =
+           list(axis.line = list(col =  'transparent'))),
+  spplot(carto_aragon,
+         c("pob_disc"),
+         col.regions = brewer.pal(7,'Oranges'),
+         main = "Población 95",
+         par.settings =
+           list(axis.line = list(col =  'transparent'))), 
+  ncol=2)
+
+
+```
+
+<font size="2"> *Figura 1.* Izquierda: representación geográfica del SMR asociado a cada municipio de Aragón. Derecha: representación gráfica del tamaño de población por municipios de Aragón en el año 1995. </font>
+
+Para solucionar este problema del SMR se recurre al modelo BYM. Es posible trabajar este tipo de modelos tanto en WinBUGS como en INLA.
+
+## BYM con WinBUGS
+
+Un aspecto importante en los modelos simulados con WinBUGS es el análisis de los criterios de convergencia. Por este motivo, se recomienda hacer una revisión visual de las cadenas para ver que convergen de manera adecuada. Algunos indicadores útiles para evaluar el modelo son el $Rhat$, cuyo valor conviene que sea inferior a 1.1, que señala si las cadenas han convergido, o el $neff$, que se recomienda que sea al menos superior a 100 y evidencia si el número efectivo de muestras independientes es adecuado.
+
+En este caso, se ajustó un primer modelo (model_WB_1), con resultados poco prometedores. El $Rhat$ máximo en este caso fue de 1.16, superior al límite normalmente empleado de 1.1. Además, el $neff$ mínimo es de 25, insuficiente como para validar la modelización (se recomienda que al menos sea de 100). Un segundo modelo (model_WB_2) trata de solventar el reducido $neff$ aumentando los parámetros $n.iter$ y $n.burnin$, pero no consige mejorar los resultados del primer modelo. Por este motivo, se ajusta un tercer modelo, sobre el cual se han aplicado ajustes, matemáticamente equivalentes, para mejorar la eficiencia del modelo. También se añade la estimación de la distribución predictiva de los casos de isquemia para cada localización. El resumen de los resultados de todos los modelos se recogen en la *Tabla 1*.
+
+```{r ajuste del modelo WinBUGS 1, echo = F, eval = F}
+
+# Model_Aragon_WB_1
+model_WB_1 <- function(){
+  # verosimilitud
+  for(i in 1:n){
+    O[i]~dpois(mu[i])                         # poisson para observados
+    log(mu[i])<-log(E[i])+m+het[i]+sp[i]      # log(mu) relacionado con el predictor lineal
+    het[i]~dnorm(0,prechet)                   # efecto aleatorio heterogéneo
+    R[i]<-exp(m+het[i]+sp[i])                 # sSMR o Riesgo
+}
+  # distribuciones a priori
+  sp[1:n]~car.normal(adj[],w[],num[],precsp)  # efecto aleatorio espacial
+  m~dflat()                                   
+  prechet<-pow(sdhet,-2); precsp<-pow(sdsp,-2)
+  sdhet~dunif(0,10); sdsp~dunif(0,10)         
+  
+  # probabilidad de R > 1
+  for (i in 1:729){
+  P.R1[i]<-step(R[i]-1)                       
+  }
+}
+
+datos_aragon <- list( O = aragon_data$O,
+                      E = aragon_data$E,
+                      adj = vecinos$adj,
+                      w = vecinos$weights,
+                      num = vecinos$num,
+                      n = 729)
+
+iniciales_aragon <- function() {
+  list(m = rnorm(1, 0, 10),
+       sdhet = runif(1),
+       sdsp = runif(1),
+       het = rnorm(729))
+}
+
+param <- c("sdhet", "sdsp", "m","R", "P.R1")
+
+set.seed(611)
+resul_WB_1 <- bugs(data = datos_aragon, 
+                       inits = iniciales_aragon, 
+                       param = param, 
+                       model = model_WB_1, 
+                       debug = FALSE)
+
+# Evaluación de la convergencia
+max(resul_WB_1$summary[1:732,8]) 
+min(resul_WB_1$summary[1:732,9])
+```
+
+```{r ajuste del modelo WinBUGS 2, echo = F, eval = F}
+
+# Model_Aragon_WB_2
+model_WB_1 <- function(){
+  # verosimilitud
+  for(i in 1:n){
+    O[i]~dpois(mu[i])                         # poisson para observados
+    log(mu[i])<-log(E[i])+m+het[i]+sp[i]      # log(mu) relacionado con el predictor lineal
+    het[i]~dnorm(0,prechet)                   # efecto aleatorio heterogéneo
+    R[i]<-exp(m+het[i]+sp[i])                 # sSMR o Riesgo
+}
+  # distribuciones a priori
+  sp[1:n]~car.normal(adj[],w[],num[],precsp)  # efecto aleatorio espacial
+  m~dflat()                                   
+  prechet<-pow(sdhet,-2); precsp<-pow(sdsp,-2)
+  sdhet~dunif(0,10); sdsp~dunif(0,10)         
+  
+  # probabilidad de R >1
+  for (i in 1:729){
+  P.R1[i]<-step(R[i]-1)                       
+  }
+}
+
+datos_aragon <- list( O = aragon_data$O,
+                      E = aragon_data$E,
+                      adj = vecinos$adj,
+                      w = vecinos$weights,
+                      num = vecinos$num,
+                      n = 729)
+
+iniciales_aragon <- function() {
+  list(m = rnorm(1, 0, 10),
+       sdhet = runif(1),
+       sdsp = runif(1),
+       het = rnorm(729))
+}
+
+param <- c("sdhet", "sdsp", "m","R", "P.R1")
+
+set.seed(611)
+resul_WB_2 <- bugs(data = datos_aragon, 
+                       inits = iniciales_aragon, 
+                       param = param, 
+                       model = model_WB_1,
+                       n.iter = 15000, 
+                       n.burnin = 8000, 
+                       debug = FALSE)
+
+# Evaluación de la convergencia
+(max(resul_WB_2$summary[1:732,8]))
+(min(resul_WB_2$summary[1:732,9]))
+```
+
+```{r ajuste del modelo WinBUGS 3, echo=TRUE}
+
+# Modelo 3 (mejoras computacionales)
+model_WB_3 <- function(){
+
+  # verosimilitud
+  for(i in 1:n){
+    O[i]~dpois(mu[i])                                   # poisson para observados
+    log(mu[i])<-log(E[i])+m+sdhet*het[i]+sdsp*sp[i]     # log(mu) relacionado con el predictor lineal
+    het[i]~dnorm(0,1)                                   # efecto aleatorio heterogéneo
+    R[i]<-exp(m+sdhet*het[i]+sdsp*sp[i])                # sSMR o Riesgo
+}
+
+  # iniciales
+  sp[1:n]~car.normal(adj[],w[],num[],1)                 # efecto aleatorio espacial
+  m~dflat()
+  prechet<-pow(sdhet,-2); precsp<-pow(sdsp,-2)
+  sdhet~dunif(0,10); sdsp~dunif(0,1)
+  
+  # probabilidad de riesgo > 1
+  for (i in 1:729){   
+  P.R1[i]<-step(R[i]-1)}
+  
+  # predictiva de observados
+  for (i in 1:n){
+    YPred[i] ~ dpois(mu[i])
+    res[i] <- YPred[i] - O[i]
+  }
+}
+
+datos_aragon <- list( O = aragon_data$O,
+                      E = aragon_data$E,
+                      adj = vecinos$adj,
+                      w = vecinos$weights,
+                      num = vecinos$num,
+                      n = 729)
+
+iniciales_aragon <- function() {
+  list(m = rnorm(1, 0, 10),
+       sdhet = runif(1),
+       sdsp = runif(1),
+       het = rnorm(729),
+       sp = rnorm(729))
+}
+
+param <- c("sdhet", "sdsp", "m","R", "P.R1", "YPred")
+
+set.seed(611)
+resul_WB_3 <- bugs(data = datos_aragon, 
+                            inits = iniciales_aragon, 
+                            param = param, 
+                            model = model_WB_3, 
+                            n.iter = 10000, 
+                            debug = FALSE)
+```
+
+```{r max y minimos del modelo WB 3, include = F}
+# Evaluación de la convergencia
+(max(resul_WB_3$summary[1:732,8]))
+(min(resul_WB_3$summary[1:732,9]))
+
+```
+
+<font size="2">*Tabla 1*. Comparación de el Rhat máximo y el neff mínimo obtenidos para las estimaciones de los riesgos, del intercept y de sdsp y sdhet bajo diferentes modelos planteados. </font>
+
+| Modelo     | max(Rhat) | min(neff) | n.iter | n.burnin |
+|------------|-----------|-----------|--------|----------|
+| resul_WB_1 | 1.16      | 19        | 2000   | 1000     |
+| resul_WB_2 | 1.20      | 15        | 15000  | 8000     |
+| resul_WB_3 | 1.02      | 110       | 10000  | 5000     |
+
+Por tanto, solo el que presenta la mejora computacional parece válido en términos de $Rhat$ y $neff$. Dado esto, los riesgos y las probabilidades que aparecen en los mapas serán los que se obtienen mediante el tercer modelo.
+
+```{r resultados winbugs}
+# Valor medio del Riesgo, Probabilidad de riesgo >1 y predictiva
+medias_pr_WB <- resul_WB_3$mean$P.R1
+medias_r_WB <- resul_WB_3$mean$R
+medias_Ypred_WB <- resul_WB_3$mean$YPred
+
+# Guardar en el data frame 
+carto_aragon$r_WB <- resul_WB_3$mean$R
+carto_aragon$pr_WB <- resul_WB_3$mean$P.R1
+carto_aragon$YPred_WB <- resul_WB_3$mean$YPred
+```
+
+```{r representación gráfica del modelo WB}
+# Discretizar el Riesgo y Probabilidad de Riesgo >1
+r_cutoff<- c(0,0.70,0.80,0.9,1.1,1.2,1.3,1.8)
+pr_cutoff <- c(0,0.30,0.50,0.70,0.90,1.00)
+
+medias_r_WB_disc = cut(medias_r_WB,
+               breaks         = r_cutoff,
+               include.lowest = TRUE)
+
+medias_pr_WB_disc = cut(medias_pr_WB,
+               breaks         = pr_cutoff,
+               include.lowest = TRUE)
+
+# Guardar en el data frame 
+carto_aragon$r_WB_disc <- medias_r_WB_disc
+carto_aragon$pr_WB_disc <- medias_pr_WB_disc
+
+# Dibujar Riesgo y Probabilidad de Riesgo >1
+grid.arrange(spplot(carto_aragon,
+                    c("r_WB_disc"),
+                    col.regions = brewer.pal(8,'BrBG'),
+                    main        = "Riesgos WinBUGS ",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))),
+             spplot(carto_aragon,
+                    c("pr_WB_disc"),
+                    col.regions = brewer.pal(7,'BrBG'),
+                    main        = "P(R > 1) WinBUGS ",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))), ncol = 2)
+
+```
+
+<font size="2"> *Figura 2*. Izquierda: representación geográfica de la media a posteriori del riesgo en cada uno de los municipios de Aragón. Derecha: representación geográfica de la probabilidad de que el riesgo sea superior a 1 en los municipios de Aragón. Ambos valores han sido estimados a través de WinBUGS con el tercer modelo ajustado.</font>
+
+## BYM con INLA
+
+INLA es un un método de inferencia bayesiana alternativo al método MCMC. Mientras que MCMC es un método asintóticamente exacto, INLA se trata de una aproximación. La ventaja de INLA reside en que mejora la computación del modelo, aumentando la rapidez de los resultados. Bajo determinadas circunstancias, además, los errores de ambos métodos son muy parecidos.
+
+El requisito que debe cumplir un modelo para poder utilizar INLA es que debe tener un campo latente gaussiano. Como se puede observar en el apartado *Modelización de la enfermedad isquémica en Aragón*, el modelo utilizado sí presenta un campo latente gaussiano y, se considera adecuado aplicar INLA.
+
+```{r ajuste del modelo INLA, echo = TRUE}
+# Definición de la relación de Vecindad
+nb2INLA("./ARGN.graph", carto_aragon_nb)
+H <- inla.read.graph(filename="./ARGN.graph")
+
+# Definición de los efectos aleatorios
+S <- U <- seq(1,729)
+data <- cbind(aragon_data, S, U)
+
+
+# Formula 
+formula <- O ~ 1 + 
+               # efecto aleatorio espacial
+               f(S, 
+                 model = "besag",
+                 graph = H,
+                 scale.model = TRUE,
+                 hyper = 
+                       list(prec = list(prior="loggamma",param = c(1,0.001)))) +
+               # efecto aleatorio 
+               f(U,
+                 model = "iid",
+                 hyper =  
+                       list(prec = list(prior="loggamma",param = c(1,0.001))))
+
+# Ajuste del modelo
+model_INLA_1 <- inla(formula,
+                     family = "poisson",      # ajuste poisson
+                     data = data,             # datos
+                     E = E,                   # valores esperados (~offset)
+                     control.compute = 
+                       list(dic = TRUE, waic = TRUE, cpo = TRUE),
+                     control.predictor =
+                       list(compute=TRUE, cdf=c(log(1)))) 
+
+
+```
+
+```{r resultados INLA}
+# Guardar Riesgo, Probabilidad de Riesgo >1 y distribución predictiva
+carto_aragon$r_INLA <- model_INLA_1$summary.fitted.values$mean 
+carto_aragon$pr_INLA <- 1 - model_INLA_1$summary.fitted.values$`1 cdf` 
+carto_aragon$YPred_INLA <- model_INLA_1$summary.fitted.values$mean * aragon_data$E
+
+# Discretizar el Riesgo y Probabilidad de Riesgo >1
+r_cutoff<- c(0,0.70,0.80,0.9,1.1,1.2,1.3,1.8)
+pr_cutoff <- c(0,0.30,0.50,0.70,0.90,1.00)
+
+medias_r_INLA_disc = cut(carto_aragon$r_INLA,
+               breaks         = r_cutoff,
+               include.lowest = TRUE)
+
+medias_pr_INLA_disc = cut(carto_aragon$pr_INLA,
+               breaks         = pr_cutoff,
+               include.lowest = TRUE)
+
+# Guardar en el data frame 
+carto_aragon$r_INLA_disc <- medias_r_INLA_disc
+carto_aragon$pr_INLA_disc <- medias_pr_INLA_disc
+
+# Dibujar Riesgo y Probabilidad de Riesgo >1
+grid.arrange(spplot(carto_aragon,
+                    c("r_INLA_disc"),
+                    col.regions = brewer.pal(7,'BrBG'),
+                    main        = "Riesgos INLA",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))),
+             spplot(carto_aragon,
+                    c("pr_INLA_disc"),
+                    col.regions = brewer.pal(5,'BrBG'),
+                    main        = "P(R > 1) INLA",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))), ncol = 2)
+
+
+
+```
+<font size="2">*Figura 3*. Izquierda: representación geográfica de la media a posteriori del riesgo en cada uno de los municipios de Aragón. Derecha: representación geográfica de la probabilidad de que el riesgo sea superior a 1 en los municipios de Aragón. Ambos valores han sido estimados a través del modelo INLA.</font>
+
+## Comparación entre los resultados de WinBUGS e INLA
+
+```{r WB vs INLA SMR}
+# Dibujar Riesgo en ambos modelos
+grid.arrange(spplot(carto_aragon,
+                    c("r_WB_disc"),
+                    col.regions = brewer.pal(7,'Blues'),
+                    main        = "sSMR WinBUGS ",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))),
+            spplot(carto_aragon,
+                    c("r_INLA_disc"),
+                    col.regions = brewer.pal(7,'Blues'),
+                    main        = "sSMR INLA",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))), ncol=2 )
+```
+
+<font size="2">*Figura 4*. Izquierda: representación geográfica de la media a posteriori del riesgo en cada uno de los municipios de Aragón con estimaciones realizadas a través de WinBUGS. Derecha: representación geográfica de la media a posteriori del riesgo en cada uno de los municipios de Aragón con estimaciones realizadas a mediante INLA.</font>
+
+```{r WB vs INLA PR}
+##Dibujar Probabilidad de Riesgo >1 en ambos modelos
+grid.arrange(spplot(carto_aragon,
+                    c("pr_WB_disc"),
+                    col.regions = brewer.pal(7,'Blues'),
+                    main        = "P(Riesgo>1) WinBUGS ",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))),
+            spplot(carto_aragon,
+                    c("pr_INLA_disc"),
+                    col.regions = brewer.pal(7,'Blues'),
+                    main        = "P(Riesgo>1) INLA",
+                    par.settings =
+                      list(axis.line = list(col =  'transparent'))), ncol=2 )
+```
+
+<font size="2">*Figura 5*. Izquierda: representación geográfica de la media a posteriori de la probabilidad de riesgo en cada uno de los municipios de Aragón con estimaciones realizadas a través de WinBUGS. Derecha: representación geográfica de la media a posteriori de la probabilidad de riesgo en cada uno de los municipios de Aragón con estimaciones realizadas con el modelo ajustado con INLA.</font>
+
+# Conclusiones
+
+**1. La zona central de Aragón presenta riesgos más elevados de mortalidad por enfermedad isquémica en hombres durante el periodo 1991-2000**
+
+A nivel gráfico, las Figuras 2 y 3 muestran riesgos más altos en la zona central izquierda de Aragón. Al consultar un mapa físico de Aragón, se observa que los municipios con un sSMR más alto parecen estar alrededor del río. Por tanto, se propone como futura vía de investigación ver si la influencia del río (o alguna variable relacionada) podría estar elevando el riesgo de enfermedad. 
+
+Este resultado apoyaría la idea de Havulina, Pääkkönen, Karvonen & Salomaa [-@ha2008] de que una mejor comprensión de la distribución espacial de las enfermedades cardiovasculares puede suponer una mejora en el entendimiento de la etiología de la enfermedad, de los posibles recursos para el tratamiento y de las necesidades del sistema de salud de una región.
+
+**2. MCMC e INLA producen estimaciones similares**
+
+Las estimaciones obtenidas mediante MCMC aportan resultados similares a las estimaciones mediante INLA. En la Figura 4 se aprecia que, pese a las pequeñas diferencias, el patrón de riesgos es el mismo para ambos métodos.
+
+Para una mejor comparativa, y a modo de resumen general de todos los resultados obtenidos, se emplea la librería `leaflet` para generar un gráfico interactivo de Aragón. Cada municipio tiene un desplegable donde se recogen parámetros poblacionales y parámetros obtenidos a lo largo del documento, como la población, los casos observados y esperados, los casos predichos por cada modelo, la SMR cruda y suavizada (WinBUGS e INLA) y la probabilidad de que el riesgo sea \> 1. Los cortes de la variable respresentada se realizan en base a los cuartiles en este caso.
+
+```{r}
+# Modificar los datos para leer con Leaflet 
+
+map <- read_sf(file.path("datos", "aragon.shp"))
+map <- st_set_crs(map, 25830) 
+map <- st_transform(map, 4326) 
+map <- map %>% left_join(carto_aragon@data)
+
+# Cloreado  en base a los cuantiles
+pal <- colorQuantile(palette = "BrBG", 
+                        domain = map$r_WB, reverse = TRUE,
+                        probs = c(0, 0.25, 0.5, 0.7, 0.9, 0.95, 1))
+
+# Preparación de la leyenda de colores del mapa
+colores <- unique(pal(sort(map$r_WB))) 
+leyenda <- cut(round(map$r_WB, 2), 
+               round(quantile(map$r_WB,
+                             c(0, 0.25, 0.5, 0.7, 0.9, 0.95, 1)), 2),
+                             include.lowest = TRUE) %>%
+           levels() %>%
+           gsub(",", " - ", .)
+
+# Etiquetas 
+tags <- sprintf(
+  "<strong> %s </strong> <br/>
+  Observados: %s <br/>
+  Esperados: %s <br/>
+  Predichos (WinBUGS): %s <br/>
+  Predichos (INLA): %s <br/>
+  SMR: %s <br/>
+  SMR suavizado (WinBUGS): %s <br/>
+  SMR siavizado (INLA): %s <br/>
+  P(Riesgo >1) WinBUGS: %s <br/>
+  P(Riesgo >1) INLA: %s <br/>",
+  
+  map$NOMBRE,
+  map$O,
+  round(map$E,1),
+  round(map$YPred_WB, 1),
+  round(map$YPred_INLA, 1),
+  round(map$SMR_raw, 1),
+  round(map$r_WB, 1),
+  round(map$r_INLA, 2),
+  round(map$pr_WB, 2),
+  round(map$pr_INLA, 2)) %>%
+  lapply(htmltools::HTML)
+
+# Creación del mapa
+(mapaAragon <- leaflet(map) %>%
+  addTiles() %>%
+  addPolygons(
+    color = "black", fillColor = ~ pal(r_WB),
+    fillOpacity = 0.7,
+    weight = 1,
+    highlightOptions = highlightOptions(
+      weight = 3,
+      color = "red",
+      fillOpacity = 1,
+      bringToFront = TRUE),
+    label = tags,
+    labelOptions = labelOptions(
+      style = list(
+        "font-weight" = "normal",
+        padding = "3px 8px"
+      ),
+      textsize = "15px", direction = "auto"
+    )
+  ) %>%
+  addLegend(title = "RMS (WinBUGS)",
+            colors = colores, 
+            labels = leyenda,
+            opacity = 1))
+
+```
+
+
+
+# Referencias
+
+\nocite{*}
+
+</p>
