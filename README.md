@@ -9,6 +9,7 @@ The code to replicate this work is avaiable in this repository. There, it is the
 
 After downloading the project, if the interest is in the code `.rmd`, it is better to open first the Rproject. Then, open the code inside this environmet, so the data is well loaded.
 Some chunks are not shown in the final document, as they were irrelevant to discuss the results. If interested, just change the first chunk in the `.rmd` (`{r setup}`)  to `echo = T`. Som other chunks were setted to `eval = F`, e.g. the previous trials performed with winBUGS, in order to improve the knit of the final `.html`. To eval this code, it is suggested to follow directly the code (or change to `eval = T` the associated chunk options). 
+
 Contact us by email ([estera\@alumni.uv.es],[pausise\@alumni.uv.es]) or GitHub (<https://github.com/E-terat>).
 
 
