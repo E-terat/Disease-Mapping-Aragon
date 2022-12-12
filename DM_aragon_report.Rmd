@@ -65,8 +65,7 @@ La modelización jerárquica del SMR puede solucionar los inconvenientes asociad
 
 Un modelo más sofisticado permitiría introducir información de vecindad, ya que las zonas cercanas deberían ser parecidas entre sí. Este tipo de datos se pueden incluir como efecto aleatorio con dependencia espacial asumiendo una **distribución Condicional Auto-Regresiva - Normal** (CAR-normal), permitiendo relacionar la observación de una zona con las observaciones de sus localizaciones colindantes. El modelo propuesto por Besaj, York & Mollié [-@besag1991] (modelo BYM) permite aproximar este análisis espacial de riesgos en áreas pequeñas, siendo lo suficientemente flexible como para, aún suavizando el SMR, dejar sobresalir las regiones que tengan un exceso o defecto de riesgo real. Por tanto, la suavización dependerá de los propios datos.
 
-En el presente trabajo se pretende evaluar el comportamiento del modelo BYM en datos de mortalidad por enfermedad
-isquémica masculina en Aragón durante el periodo 1991-2000. Para ello se hará uso de la inferencia bayesiana, empleando diferentes sofwares de implementación. Por un lado, se utilizará el programa WinBUGS, programa estadístico para análisis bayesiano mediante MCMC (Markov Chain Monte-Carlo). Por otro, se implementará el modelo mediante Integrated Nested Lapace Aproximation (INLA), una aproximación a la Inferencia Bayesiana para modelos Latentes Gaussianos.
+En el presente trabajo se pretende evaluar el comportamiento del modelo BYM en datos de mortalidad por enfermedad isquémica masculina en Aragón durante el periodo 1991-2000. Para ello se hará uso de la inferencia bayesiana, empleando diferentes sofwares de implementación. Por un lado, se utilizará el programa WinBUGS, programa estadístico para análisis bayesiano mediante MCMC (Markov Chain Monte-Carlo). Por otro, se implementará el modelo mediante Integrated Nested Lapace Aproximation (INLA), una aproximación a la Inferencia Bayesiana para modelos Latentes Gaussianos.
 
 # Reproducibilidad
 
@@ -81,10 +80,9 @@ Algunos trozos del código disponibles en el `.rmd` no aparecen en el `html` fin
 
 Por otro lado, se hace notar que se ha empleado la nomenclatura de tipo snake_case.
 
-Para cualquier duda, el equípo queda totalmente a su disposición. Puede contactar mediante email ([estera\@alumni.uv.es](mailto:estera@alumni.uv.es){.email},[pausise\@alumni.uv.es](mailto:pausise@alumni.uv.es){.email}) o a través de GitHub (<https://github.com/E-terat>).
+Para cualquier duda, el equípo queda totalmente a su disposición. Puede contactar mediante email ([estera\@alumni.uv.es](mailto:estera@alumni.uv.es){.email},[pausise\@alumni.uv.es](mailto:pausise@alumni.uv.es){.email}) o a través de GitHub (<https://github.com/E-terat>, <https://github.com/PaulaSinis>).
 
 # Modelización de la enfermedad isquémica en Aragón 
-\label{sec:modelizacion}
 
 Tal y como se adelantaba, el interés está en obtener la distribución a posteriori del SMR (estimador de riesgo) de la Enfermedad Isquémica en Aragón, incorporando la propuesta de BYM. Para ello, se consideran los casos observados (O) en cada municipio como distribuidos según una Poisson de parámetro $\mu$, tal que
 
@@ -113,7 +111,7 @@ de forma que el efecto aleatorio heterogéneo se distribuye como una Normal cent
 
 Como se ha explicado previamente, el SMR ($SMR= O_i/E_i$) se utiliza como estimador del riesgo para evitar un sesgo causado por el tamaño de población. Sin embargo, este estimador presenta algunos problemas cuando se utiliza con áreas pequeñas.
 
-Al comparar el mapa del SMR por municipios y el de la población de Aragón en el año 1995 (Figura 1), se puede observar que la zona central de Aragón es la que más población presenta y también es esta zona la que presenta SMR más intermedias, mientras que en los extremos de la comunidad, donde las poblaciones son más pequeñas, los valores de SMR se vuelven extremos. Esto evidencia el problema de estimación en áreas pequeñas.
+Al comparar el mapa del SMR por municipios y el de la población de Aragón en el año 1995 (Figura 1), se puede observar que la zona central de Aragón, con mayor población, presenta SMRs intermedias, mientras que en los extremos de la comunidad, donde las poblaciones son más pequeñas, los valores de SMR se vuelven extremos. Esto evidencia el problema de estimación en áreas pequeñas.
 
 ```{r calculo de SMR raw}
 # Cálculo de la SMR raw (Standarized Mortality Rate) 
@@ -168,7 +166,7 @@ Para solucionar este problema del SMR se recurre al modelo BYM. Es posible traba
 
 Un aspecto importante en los modelos simulados con WinBUGS es el análisis de los criterios de convergencia. Por este motivo, se recomienda hacer una revisión visual de las cadenas para ver que convergen de manera adecuada. Algunos indicadores útiles para evaluar el modelo son el $Rhat$, cuyo valor conviene que sea inferior a 1.1, que señala si las cadenas han convergido, o el $neff$, que se recomienda que sea al menos superior a 100 y evidencia si el número efectivo de muestras independientes es adecuado.
 
-En este caso, se ajustó un primer modelo (model_WB_1), con resultados poco prometedores. El $Rhat$ máximo en este caso fue de 1.16, superior al límite normalmente empleado de 1.1. Además, el $neff$ mínimo es de 25, insuficiente como para validar la modelización (se recomienda que al menos sea de 100). Un segundo modelo (model_WB_2) trata de solventar el reducido $neff$ aumentando los parámetros $n.iter$ y $n.burnin$, pero no consige mejorar los resultados del primer modelo. Por este motivo, se ajusta un tercer modelo, sobre el cual se han aplicado ajustes, matemáticamente equivalentes, para mejorar la eficiencia del modelo. También se añade la estimación de la distribución predictiva de los casos de isquemia para cada localización. El resumen de los resultados de todos los modelos se recogen en la *Tabla 1*.
+En este caso, se ajustó un primer modelo (model_WB_1), con resultados poco prometedores. El $Rhat$ máximo en este caso fue de 1.16, superior al límite normalmente empleado de 1.1. Además, el $neff$ mínimo es de 25, insuficiente como para validar la modelización (se recomienda que al menos sea de 100). Un segundo modelo (model_WB_2) trata de solventar el reducido $neff$ aumentando los parámetros $n.iter$ y $n.burnin$, pero no consige mejorar los resultados del primer modelo. Por este motivo, se ajusta un tercer modelo, sobre el cual se han aplicado ajustes, matemáticamente equivalentes, para mejorar la eficiencia del modelo. También se añade la estimación de la distribución predictiva de los casos de isquemia para cada localización. El resumen de los resultados de todos los modelos se recoge en la *Tabla 1*.
 
 ```{r ajuste del modelo WinBUGS 1, echo = F, eval = F}
 
@@ -379,14 +377,14 @@ carto_aragon$pr_WB_disc <- medias_pr_WB_disc
 # Dibujar Riesgo y Probabilidad de Riesgo >1
 grid.arrange(spplot(carto_aragon,
                     c("r_WB_disc"),
-                    col.regions = brewer.pal(8,'BrBG'),
+                    col.regions = brewer.pal(7,'BrBG'),
                     main        = "Riesgos WinBUGS ",
                     par.settings =
                       list(axis.line = list(col =  'transparent'))),
              spplot(carto_aragon,
                     c("pr_WB_disc"),
                     col.regions = brewer.pal(7,'BrBG'),
-                    main        = "P(R > 1) WinBUGS ",
+                    main        = "P(Riesgo>1) WinBUGS ",
                     par.settings =
                       list(axis.line = list(col =  'transparent'))), ncol = 2)
 
@@ -470,7 +468,7 @@ grid.arrange(spplot(carto_aragon,
              spplot(carto_aragon,
                     c("pr_INLA_disc"),
                     col.regions = brewer.pal(5,'BrBG'),
-                    main        = "P(R > 1) INLA",
+                    main        = "P(Riesgo>1) INLA",
                     par.settings =
                       list(axis.line = list(col =  'transparent'))), ncol = 2)
 
@@ -485,13 +483,13 @@ grid.arrange(spplot(carto_aragon,
 # Dibujar Riesgo en ambos modelos
 grid.arrange(spplot(carto_aragon,
                     c("r_WB_disc"),
-                    col.regions = brewer.pal(7,'Blues'),
+                    col.regions = brewer.pal(7,'BrBG'),
                     main        = "sSMR WinBUGS ",
                     par.settings =
                       list(axis.line = list(col =  'transparent'))),
             spplot(carto_aragon,
                     c("r_INLA_disc"),
-                    col.regions = brewer.pal(7,'Blues'),
+                    col.regions = brewer.pal(7,'BrBG'),
                     main        = "sSMR INLA",
                     par.settings =
                       list(axis.line = list(col =  'transparent'))), ncol=2 )
@@ -503,13 +501,13 @@ grid.arrange(spplot(carto_aragon,
 ##Dibujar Probabilidad de Riesgo >1 en ambos modelos
 grid.arrange(spplot(carto_aragon,
                     c("pr_WB_disc"),
-                    col.regions = brewer.pal(7,'Blues'),
+                    col.regions = brewer.pal(7,'BrBG'),
                     main        = "P(Riesgo>1) WinBUGS ",
                     par.settings =
                       list(axis.line = list(col =  'transparent'))),
             spplot(carto_aragon,
                     c("pr_INLA_disc"),
-                    col.regions = brewer.pal(7,'Blues'),
+                    col.regions = brewer.pal(7,'BrBG'),
                     main        = "P(Riesgo>1) INLA",
                     par.settings =
                       list(axis.line = list(col =  'transparent'))), ncol=2 )
@@ -521,13 +519,13 @@ grid.arrange(spplot(carto_aragon,
 
 **1. La zona central de Aragón presenta riesgos más elevados de mortalidad por enfermedad isquémica en hombres durante el periodo 1991-2000**
 
-A nivel gráfico, las Figuras 2 y 3 muestran riesgos más altos en la zona central izquierda de Aragón. Al consultar un mapa físico de Aragón, se observa que los municipios con un sSMR más alto parecen estar alrededor del río. Por tanto, se propone como futura vía de investigación ver si la influencia del río (o alguna variable relacionada) podría estar elevando el riesgo de enfermedad. 
+A nivel gráfico, las Figuras 2 y 3 muestran riesgos más altos en la zona central izquierda de Aragón. Al consultar un mapa físico de Aragón, se observa que los municipios con un sSMR más alto parecen estar alrededor del río Ebro. Esto se aprecia todavía mejor en el último mapa generado en el documento, sobre la topografía de la provincia de Aragón. Ante esto, se propone como futura vía de investigación ver si la influencia del río (o alguna variable relacionada) podría estar elevando el riesgo de mortalidad. 
 
 Este resultado apoyaría la idea de Havulina, Pääkkönen, Karvonen & Salomaa [-@ha2008] de que una mejor comprensión de la distribución espacial de las enfermedades cardiovasculares puede suponer una mejora en el entendimiento de la etiología de la enfermedad, de los posibles recursos para el tratamiento y de las necesidades del sistema de salud de una región.
 
 **2. MCMC e INLA producen estimaciones similares**
 
-Las estimaciones obtenidas mediante MCMC aportan resultados similares a las estimaciones mediante INLA. En la Figura 4 se aprecia que, pese a las pequeñas diferencias, el patrón de riesgos es el mismo para ambos métodos.
+Las estimaciones obtenidas mediante MCMC aportan resultados similares a las estimaciones mediante INLA. En la Figura 4 y 5 se aprecia que, pese a las pequeñas diferencias, el patrón de riesgos y probabilidades es el mismo para ambos métodos. 
 
 Para una mejor comparativa, y a modo de resumen general de todos los resultados obtenidos, se emplea la librería `leaflet` para generar un gráfico interactivo de Aragón. Cada municipio tiene un desplegable donde se recogen parámetros poblacionales y parámetros obtenidos a lo largo del documento, como la población, los casos observados y esperados, los casos predichos por cada modelo, la SMR cruda y suavizada (WinBUGS e INLA) y la probabilidad de que el riesgo sea \> 1. Los cortes de la variable respresentada se realizan en base a los cuartiles en este caso.
 
